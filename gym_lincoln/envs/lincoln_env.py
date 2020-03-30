@@ -13,16 +13,16 @@ class LincolnEnv(gym.Env):
             A pole is attached by an un-actuated joint to a cart, which moves along a frictionless track. The pendulum starts upright, and the goal is to prevent it from falling over by increasing and reducing the cart's velocity.
         Source:
             This environment corresponds to the version of dynamic positioning as described by Nick Kougiatsos
-        Observation: 
+        Observation:
             Type: Box(6)
             Num	Observation                 Min         Max
             0	Y position                  -4 m         4 m
-            1	Y speed                     -Inf         Inf 
+            1	Y speed                     -Inf         Inf
             2   Y acc                       -Inf         Inf
             3	Heading angle              -5 deg        5 deg
             4	Yaw speed                   -Inf         Inf
             5	Yaw acc                     -Inf         Inf
-            
+
         Actions:
             Type: Discrete(2)
             Num	Action
@@ -30,7 +30,7 @@ class LincolnEnv(gym.Env):
             1   side-
             2   ccw
             3   cw
-            
+
             Note: The amount the velocity that is reduced or increased is not fixed; it depends on the angle the pole is pointing. This is because the center of gravity of the pole increases the amount of energy needed to move the cart underneath it
         Reward:
             Reward is 1 for every step taken, including the termination step
@@ -43,6 +43,7 @@ class LincolnEnv(gym.Env):
             Solved Requirements
             Considered solved when the average reward is greater than or equal to 195.0 over 100 consecutive trials.
         """
+        self.elapsed=0
         self.tau=0.02
         self.max_speed=5*0.5144
         self.T1=383.22
@@ -76,7 +77,29 @@ class LincolnEnv(gym.Env):
 
     def seed(self, seed=None):
             self.np_random, seed = seeding.np_random(seed)
-            return [seed]  
+            return [seed]
+
+    def wave_dist(H,period,psi,t,rel_wave_angle):
+        amp=H/2
+        w=2*np.pi/period
+        k=w**2/self.g
+        A=np.array([0.10836, 0.10566, 0.1056, 0.10834, 0])
+         #A=[1.357 3.921 3.921 3.921 0]
+        pos=np.array([0, self.L/4, self.L/2, 3*self.L/4, self.L])
+        h=self.L/4
+        Apos=np.dot(A,pos)
+        x=psi+rel_wave_angle
+        f1=np.dot(Apos,np.cos(k*pos*np.cos(x)))
+        f2=np.dot(Apos,np.sin(k*pos*np.cos(x)))
+        f3=np.dot(A,np.cos(k*pos*np.cos(x)))
+        f4=np.dot(A,np.sin(k*pos*np.cos(x)))
+        Ax1=(h/3)*(f1[0]+4*f1[1]+2*f1[2]+4*f1[3]+f1[4])
+        Ax2=(h/3)*(f2[0]+4*f2[1]+2*f2[2]+4*f2[3]+f2[4])
+        Ax3=(h/3)*(f3[0]+4*f3[1]+2*f3[2]+4*f3[3]+f3[4])
+        Ax4=(h/3)*(f4[0]+4*f4[1]+2*f4[2]+4*f4[3]+f4[4])
+        Nwave=self.dens*self.g*amp*k*(np.sin(x)+psi*np.cos(x))*(np.sin(k*self.LCG-w*t)*Ax1+np.cos(k*self.LCG-w*t)*Ax2)
+        Ywave=self.dens*self.g*amp*k*(np.sin(x)+psi*np.cos(x))*(np.sin(k*self.LCG-w*t)*Ax3+np.cos(k*self.LCG-w*t)*Ax4)
+    return Ywave, Nwave
 
     def step(self, action):
         assert self.action_space.contains(action), "%r (%s) invalid"%(action, type(action))
@@ -94,7 +117,10 @@ class LincolnEnv(gym.Env):
         else:
             force = 0
             torque=-self.max_torque
-
+        self.elapsed+=self.tau
+        Yw, Nw= wave_dist(H=2.5,period=8.9,psi=h,t=self.elapsed,rel_wave_angle=60*np.pi/180)
+        force+=Yw*force_scale
+        torque+=Nw*torque_scale
         if self.kinematics_integrator == 'euler':
             h_2dot = h_2dot + self.tau * (-self.T2*h_2dot-h+torque)/self.T1
             h_dot = h_dot + self.tau * h_2dot
@@ -107,7 +133,7 @@ class LincolnEnv(gym.Env):
         done =  y < -self.y_threshold \
             or y > self.y_threshold \
             or h < -self.yaw_threshold_radians  \
-            or h > self.yaw_threshold_radians 
+            or h > self.yaw_threshold_radians
         done = bool(done)
 
         if not done:
@@ -146,7 +172,7 @@ class LincolnEnv(gym.Env):
             self.shiptrans = rendering.Transform()
             ship.add_attr(self.shiptrans)
             self.viewer.add_geom(ship)
-            
+
 
         if self.state is None: return None
 
